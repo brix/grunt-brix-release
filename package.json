@@ -1,0 +1,34 @@
+{
+  "name": "grunt-brix-release",
+  "version": "0.0.0",
+  "description": "A release helper for brix modules",
+  "license": "MIT",
+  "author": {
+    "name": "Evan Vosberg",
+    "email": "evanvosberg@inext.me"
+  },
+  "homepage": "https://github.com/brix/grunt-brix-release",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brix/grunt-brix-release.git"
+  },
+  "bugs": {
+    "url": "https://github.com/brix/grunt-brix-release/issues"
+  },
+  "keywords": [
+    "grunt",
+    "release",
+    "git",
+    "build"
+  ],
+  "dependencies": {
+    "grunt-bump": "0.0.16",
+    "grunt-contrib-clean": "^0.6.0",
+    "grunt-contrib-copy": "^0.6.0",
+    "grunt-exec": "^0.4.6",
+    "grunt-git": "^0.2.14",
+    "grunt-git-describe": "^2.3.2",
+    "runonymous-grunt": "0.0.1"
+  },
+  "devDependencies": {}
+}
