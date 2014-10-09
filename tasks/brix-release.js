@@ -76,7 +76,7 @@ module.exports = function (grunt) {
         taskRun = function taskRun(taskName, conf, next) {
             if (conf) {
                 // Set task config
-                grunt.config.set(taskName, set);
+                grunt.config.set(taskName, conf);
             }
 
             // Run the task
