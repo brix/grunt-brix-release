@@ -25,13 +25,10 @@ module.exports = function (grunt) {
 
             taskNext,
             taskRun,
+            taskRunMulti,
             tasks,
 
-            cfg = {},
             opts;
-
-        // Init task config
-        cfg.files = grunt.config.get('release').files || {};
 
         // Init task options
         opts = this.options({
@@ -41,7 +38,9 @@ module.exports = function (grunt) {
                 release: 'release',
                 hotfix: 'hotfix',
                 master: 'master'
-            }
+            },
+            bumpFiles: ['package.json'],
+            dest: 'build'
         });
 
         // Stop on errors
@@ -49,16 +48,20 @@ module.exports = function (grunt) {
             return grunt.log.error('Unsupported release type:', type), false;
         }
 
+        if (!opts.bumpFiles.length) {
+            return grunt.log.error('Missing definiton of files to bump version.'), false;
+        }
+
         if (!opts.buildTask) {
             return grunt.log.error('Build task is not defined'), false;
         }
 
-        if (!cfg.files.dest) {
+        if (!opts.dest) {
             return grunt.log.error('Build destination is not defined'), false;
         }
 
         // Set the releas build cwd
-        releaseBuildCwd = releasePath + cfg.files.dest + '/';
+        releaseBuildCwd = releasePath + opts.dest + '/';
 
         // Task resies helper
         taskNext = function taskNext() {
@@ -71,6 +74,16 @@ module.exports = function (grunt) {
 
         // Define config and run task
         taskRun = function taskRun(taskName, conf, next) {
+            if (conf) {
+                // Set task config
+                grunt.config.set(taskName, set);
+            }
+
+            // Run the task
+            grunt.task.run(taskName, next);
+        };
+
+        taskRunMulti = function taskRunMulti(taskName, conf, next) {
             var set;
 
             if (conf) {
@@ -78,21 +91,17 @@ module.exports = function (grunt) {
                 set = {};
                 set[releaseId] = conf;
 
-                // Set task config
-                grunt.config.set(taskName, set);
-
                 taskName += ':' + releaseId;
             }
 
-            // Run the task
-            grunt.task.run(taskName, next);
+            taskRun(taskName, set, next);
         };
 
         tasks = [
 
             // Checkout a release branch
             function (next) {
-                taskRun('gitcheckout', {
+                taskRunMulti('gitcheckout', {
                     options: {
                         cwd: '.',
                         branch: opts.gitflow.develop
@@ -101,13 +110,22 @@ module.exports = function (grunt) {
             },
 
             function (next) {
-                taskRun('bump:' + type, null, next);
+                taskRun('bump:' + type, {
+                    options: {
+                        createTag: false,
+                        commit: true,
+                        commitFiles: opts.bumpFiles,
+                        commitMessage: 'Bump v%VERSION%',
+                        push: false,
+                        gitDescribeOptions: '--tags --always --abbrev=1 --dirty=-d',
+                        globalReplace: false
+                    }
+                }, next);
             },
 
             // Read the new version
             function (next) {
                 releaseVersion = grunt.file.readJSON('package.json').version;
-
                 releaseBranch = opts.gitflow.release + '/' + releaseVersion;
 
                 next();
@@ -115,17 +133,17 @@ module.exports = function (grunt) {
 
             // Run the defined build task
             function (next) {
-                taskRun(opts.buildTask, null, next);
+                taskRunMulti(opts.buildTask, null, next);
             },
 
             // Copy the build destination
             function (next) {
-                taskRun('copy', {
+                taskRunMulti('copy', {
                     files: [{
                         expand: true,
                         dot: true,
                         src: [
-                            cfg.files.dest + '/**/*'
+                            opts.dest + '/**/*'
                         ],
                         dest: releasePath
                     }]
@@ -134,7 +152,7 @@ module.exports = function (grunt) {
 
             // Copy the repository
             function (next) {
-                taskRun('copy', {
+                taskRunMulti('copy', {
                     files: [{
                         expand: true,
                         dot: true,
@@ -158,12 +176,12 @@ module.exports = function (grunt) {
                     revision = rev;
                 });
 
-                taskRun('git-describe', {}, next);
+                taskRunMulti('git-describe', {}, next);
             },
 
             // Checkout a release branch
             function (next) {
-                taskRun('gitcheckout', {
+                taskRunMulti('gitcheckout', {
                     options: {
                         cwd: releaseBuildCwd,
                         branch: releaseBranch,
@@ -174,7 +192,7 @@ module.exports = function (grunt) {
 
             // Stage all files
             function (next) {
-                taskRun('exec', {
+                taskRunMulti('exec', {
                     cwd: releaseBuildCwd,
                     command: 'git add -A'
                 }, next);
@@ -182,7 +200,7 @@ module.exports = function (grunt) {
 
             // Commit the build
             function (next) {
-                taskRun('gitcommit', {
+                taskRunMulti('gitcommit', {
                     options: {
                         cwd: releaseBuildCwd,
                         message: 'Build release v' + releaseVersion,
@@ -194,7 +212,7 @@ module.exports = function (grunt) {
 
             // Checkout a the master branch
             function (next) {
-                taskRun('gitcheckout', {
+                taskRunMulti('gitcheckout', {
                     options: {
                         cwd: releaseBuildCwd,
                         branch: opts.gitflow.master,
@@ -205,7 +223,7 @@ module.exports = function (grunt) {
 
             // Merge release into master branch
             function (next) {
-                taskRun('gitmerge', {
+                taskRunMulti('gitmerge', {
                     options: {
                         cwd: releaseBuildCwd,
                         branch: releaseBranch,
@@ -216,7 +234,7 @@ module.exports = function (grunt) {
 
             // Tag the release
             function (next) {
-                taskRun('gittag', {
+                taskRunMulti('gittag', {
                     options: {
                         cwd: releaseBuildCwd,
                         message: 'Set release tag ' + releaseVersion,
@@ -227,7 +245,7 @@ module.exports = function (grunt) {
 
             // Checkout a previous revision
             function (next) {
-                taskRun('gitcheckout', {
+                taskRunMulti('gitcheckout', {
                     options: {
                         cwd: releaseBuildCwd,
                         branch: opts.gitflow.develop
@@ -237,7 +255,7 @@ module.exports = function (grunt) {
 
             // Delete the release branch
             function (next) {
-                taskRun('exec', {
+                taskRunMulti('exec', {
                     cwd: releaseBuildCwd,
                     command: 'git branch -D ' + releaseBranch
                 }, next);
@@ -245,7 +263,7 @@ module.exports = function (grunt) {
 
             // Copy the repository
             function (next) {
-                taskRun('clean', {
+                taskRunMulti('clean', {
                     expand: true,
                     dot: true,
                     files: [{
@@ -258,7 +276,7 @@ module.exports = function (grunt) {
 
             // Copy the repository
             function (next) {
-                taskRun('copy', {
+                taskRunMulti('copy', {
                     files: [{
                         cwd: releaseBuildCwd,
                         expand: true,
