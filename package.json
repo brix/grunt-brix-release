@@ -30,5 +30,7 @@
     "grunt-git-describe": "^2.3.2",
     "runonymous-grunt": "0.0.1"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "grunt": "^0.4.5"
+  }
 }

@@ -2,17 +2,28 @@
 
 'use strict';
 
-var path = require('path');
+var path = require('path'), loadNpmTask;
+
+loadNpmTask = function loadNpmTask(npmTask) {
+    require(npmTask + '/tasks/' + npmTask.replace(/^grunt-(contrib-)?/, ''))(loadNpmTask._grunt);
+};
+loadNpmTask.init = function init(grunt) {
+    loadNpmTask._grunt = grunt;
+};
 
 module.exports = function (grunt) {
+    loadNpmTask.init(grunt);
 
+    // Load tasks from sub path, because main is not defined
+    loadNpmTask('grunt-git');
+    loadNpmTask('grunt-exec');
+    loadNpmTask('grunt-bump');
+    loadNpmTask('grunt-contrib-copy');
+    loadNpmTask('grunt-contrib-clean');
+    loadNpmTask('grunt-git-describe');
+
+    // Load anonymous tasks hook
     require('runonymous-grunt')(grunt);
-
-    grunt.loadNpmTasks('grunt-contrib-clean');
-    grunt.loadNpmTasks('grunt-contrib-copy');
-    grunt.loadNpmTasks('grunt-git-describe');
-    grunt.loadNpmTasks('grunt-git');
-    grunt.loadNpmTasks('grunt-exec');
 
     grunt.registerTask('brix-release', 'Release a new build', function (type) {
         var releaseId = 'release' + new Date().getTime(),
@@ -39,8 +50,10 @@ module.exports = function (grunt) {
                 hotfix: 'hotfix',
                 master: 'master'
             },
-            bumpFiles: ['package.json'],
-            dest: 'build'
+            build: {},
+            bump: {
+                files: ['package.json']
+            }
         });
 
         // Stop on errors
@@ -48,20 +61,20 @@ module.exports = function (grunt) {
             return grunt.log.error('Unsupported release type:', type), false;
         }
 
-        if (!opts.bumpFiles.length) {
+        if (!opts.bump ||!opts.bump.files.length) {
             return grunt.log.error('Missing definiton of files to bump version.'), false;
         }
 
-        if (!opts.buildTask) {
+        if (!opts.build || !opts.build.task) {
             return grunt.log.error('Build task is not defined'), false;
         }
 
-        if (!opts.dest) {
+        if (!opts.build || !opts.build.dest) {
             return grunt.log.error('Build destination is not defined'), false;
         }
 
         // Set the releas build cwd
-        releaseBuildCwd = releasePath + opts.dest + '/';
+        releaseBuildCwd = releasePath + opts.build.dest + '/';
 
         // Task resies helper
         taskNext = function taskNext() {
@@ -76,7 +89,7 @@ module.exports = function (grunt) {
         taskRun = function taskRun(taskName, conf, next) {
             if (conf) {
                 // Set task config
-                grunt.config.set(taskName, conf);
+                grunt.config.set(taskName.split(':')[0], conf);
             }
 
             // Run the task
@@ -97,24 +110,39 @@ module.exports = function (grunt) {
             taskRun(taskName, set, next);
         };
 
+
+        // The task list series
+        //
+        //
         tasks = [
 
-            // Checkout a release branch
+            // Git info
             function (next) {
-                taskRunMulti('gitcheckout', {
-                    options: {
-                        cwd: '.',
-                        branch: opts.gitflow.develop
-                    }
-                }, next);
+                grunt.event.once('git-describe', function (rev) {
+                    // grunt.log.writeln("Git rev tag: " + rev.tag);
+                    // grunt.log.writeln("Git rev since: " + rev.since);
+                    // grunt.log.writeln("Git rev object: " + rev.object); // The 6 character commit SHA by itself
+                    // grunt.log.writeln("Git rev dirty: " + rev.dirty);
+                    revision = rev;
+
+                });
+
+                taskRunMulti('git-describe', {}, function () {
+                    if (revision.dirty) {
+                        return grunt.fail.fatal('Please do not release dirty versions! Commit your changes before release.');
+                    };
+
+                    next();
+                });
             },
 
+            // Bump the version
             function (next) {
                 taskRun('bump:' + type, {
                     options: {
                         createTag: false,
                         commit: true,
-                        commitFiles: opts.bumpFiles,
+                        commitFiles: opts.bump.files,
                         commitMessage: 'Bump v%VERSION%',
                         push: false,
                         gitDescribeOptions: '--tags --always --abbrev=1 --dirty=-d',
@@ -123,17 +151,39 @@ module.exports = function (grunt) {
                 }, next);
             },
 
-            // Read the new version
+            // Git info
             function (next) {
+                grunt.event.once('git-describe', function (rev) {
+                    revision = rev;
+                });
+
+                taskRunMulti('git-describe', {}, next);
+            },
+
+            // Git info extended
+            function (next) {
+                // Set release variables
                 releaseVersion = grunt.file.readJSON('package.json').version;
                 releaseBranch = opts.gitflow.release + '/' + releaseVersion;
 
-                next();
+                taskRunMulti('exec', {
+                    command: 'git describe --all',
+                    callback: function (err, all) {
+                        if (err) {
+                            return grunt.fail.fatal(err);
+                        }
+
+                        revision.branch = all
+                            .replace(/^heads\//, '')
+                            .replace(/^\s/, '')
+                            .replace(/\s$/, '');
+                    }
+                }, next);
             },
 
             // Run the defined build task
             function (next) {
-                taskRunMulti(opts.buildTask, null, next);
+                taskRunMulti(opts.build.task, null, next);
             },
 
             // Copy the build destination
@@ -143,14 +193,14 @@ module.exports = function (grunt) {
                         expand: true,
                         dot: true,
                         src: [
-                            opts.dest + '/**/*'
+                            opts.build.dest + '/**/*'
                         ],
                         dest: releasePath
                     }]
                 }, next);
             },
 
-            // Copy the repository
+            // Copy the repository to build destination
             function (next) {
                 taskRunMulti('copy', {
                     files: [{
@@ -165,25 +215,12 @@ module.exports = function (grunt) {
                 }, next);
             },
 
-            // Git info
-            function (next) {
-                grunt.event.once('git-describe', function (rev) {
-                    grunt.log.writeln("Git rev tag: " + rev.tag);
-                    grunt.log.writeln("Git rev since: " + rev.since);
-                    grunt.log.writeln("Git rev object: " + rev.object); // The 6 character commit SHA by itself
-                    grunt.log.writeln("Git rev dirty: " + rev.dirty);
-
-                    revision = rev;
-                });
-
-                taskRunMulti('git-describe', {}, next);
-            },
-
             // Checkout a release branch
             function (next) {
                 taskRunMulti('gitcheckout', {
                     options: {
                         cwd: releaseBuildCwd,
+                        verbose: true,
                         branch: releaseBranch,
                         create: true
                     }
@@ -203,6 +240,7 @@ module.exports = function (grunt) {
                 taskRunMulti('gitcommit', {
                     options: {
                         cwd: releaseBuildCwd,
+                        verbose: true,
                         message: 'Build release v' + releaseVersion,
                         noVerify: false,
                         noStatus: false
@@ -210,58 +248,7 @@ module.exports = function (grunt) {
                 }, next);
             },
 
-            // Checkout a the master branch
-            function (next) {
-                taskRunMulti('gitcheckout', {
-                    options: {
-                        cwd: releaseBuildCwd,
-                        branch: opts.gitflow.master,
-                        create: false
-                    }
-                }, next);
-            },
-
-            // Merge release into master branch
-            function (next) {
-                taskRunMulti('gitmerge', {
-                    options: {
-                        cwd: releaseBuildCwd,
-                        branch: releaseBranch,
-                        message: 'Merge from ' + releaseBranch
-                    }
-                }, next);
-            },
-
-            // Tag the release
-            function (next) {
-                taskRunMulti('gittag', {
-                    options: {
-                        cwd: releaseBuildCwd,
-                        message: 'Set release tag ' + releaseVersion,
-                        tag: releaseVersion
-                    }
-                }, next);
-            },
-
-            // Checkout a previous revision
-            function (next) {
-                taskRunMulti('gitcheckout', {
-                    options: {
-                        cwd: releaseBuildCwd,
-                        branch: opts.gitflow.develop
-                    }
-                }, next);
-            },
-
-            // Delete the release branch
-            function (next) {
-                taskRunMulti('exec', {
-                    cwd: releaseBuildCwd,
-                    command: 'git branch -D ' + releaseBranch
-                }, next);
-            },
-
-            // Copy the repository
+            // Clean the old repository
             function (next) {
                 taskRunMulti('clean', {
                     expand: true,
@@ -274,7 +261,7 @@ module.exports = function (grunt) {
                 }, next);
             },
 
-            // Copy the repository
+            // Copy the repository from release
             function (next) {
                 taskRunMulti('copy', {
                     files: [{
@@ -286,6 +273,73 @@ module.exports = function (grunt) {
                         ],
                         dest: '.'
                     }]
+                }, next);
+            },
+
+            // Clean release temp directory
+            function (next) {
+                taskRunMulti('clean', {
+                    expand: true,
+                    dot: true,
+                    files: [{
+                        src: [
+                            releasePath
+                        ]
+                    }]
+                }, next);
+            },
+
+            // Checkout a the master branch
+            function (next) {
+                taskRunMulti('gitcheckout', {
+                    options: {
+                        verbose: true,
+                        branch: opts.gitflow.master,
+                        create: false
+                    }
+                }, next);
+            },
+
+            // Merge release into master branch
+            function (next) {
+                taskRunMulti('exec', {
+                    command: 'git merge -s ours -m "Merge from ' + releaseBranch + '" ' + releaseBranch
+                }, next);
+            },
+
+            // Checkout a the master branch
+            function (next) {
+                taskRunMulti('exec', {
+                    command: 'git clean -d -f -f'
+                }, next);
+            },
+
+            // Tag the release
+            function (next) {
+                taskRunMulti('gittag', {
+                    options: {
+                        verbose: true,
+                        message: 'Set release tag ' + releaseVersion,
+                        tag: releaseVersion
+                    }
+                }, next);
+            },
+
+            // Checkout a previous revision
+            function (next) {
+                taskRunMulti('gitcheckout', {
+                    options: {
+                        verbose: true,
+                        branch: revision.branch,
+                        create: false
+                    }
+                }, next);
+            },
+
+            // Delete the release branch
+            function (next) {
+                taskRunMulti('exec', {
+                    command: 'git branch -D ' + releaseBranch
                 }, next);
             }
         ];
