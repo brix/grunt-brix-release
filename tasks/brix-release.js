@@ -186,20 +186,6 @@ module.exports = function (grunt) {
                 taskRunMulti(opts.build.task, null, next);
             },
 
-            // Copy the build destination
-            function (next) {
-                taskRunMulti('copy', {
-                    files: [{
-                        expand: true,
-                        dot: true,
-                        src: [
-                            opts.build.dest + '/**/*'
-                        ],
-                        dest: releasePath
-                    }]
-                }, next);
-            },
-
             // Copy the repository to build destination
             function (next) {
                 taskRunMulti('copy', {
@@ -217,13 +203,23 @@ module.exports = function (grunt) {
 
             // Checkout a release branch
             function (next) {
-                taskRunMulti('gitcheckout', {
-                    options: {
-                        cwd: releaseBuildCwd,
-                        verbose: true,
-                        branch: releaseBranch,
-                        create: true
-                    }
+                taskRunMulti('exec', {
+                    cwd: releaseBuildCwd,
+                    command: 'git checkout -B ' + releaseBranch
+                }, next);
+            },
+
+            // Copy the build destination
+            function (next) {
+                taskRunMulti('copy', {
+                    files: [{
+                        expand: true,
+                        dot: true,
+                        src: [
+                            opts.build.dest + '/**/*'
+                        ],
+                        dest: releasePath
+                    }]
                 }, next);
             },
 
@@ -291,12 +287,8 @@ module.exports = function (grunt) {
 
             // Checkout a the master branch
             function (next) {
-                taskRunMulti('gitcheckout', {
-                    options: {
-                        verbose: true,
-                        branch: opts.gitflow.master,
-                        create: false
-                    }
+                taskRunMulti('exec', {
+                    command: 'git checkout -f ' + opts.gitflow.master
                 }, next);
             },
 
@@ -307,7 +299,7 @@ module.exports = function (grunt) {
                 }, next);
             },
 
-            // Checkout a the master branch
+            // Clean up after merge
             function (next) {
                 taskRunMulti('exec', {
                     command: 'git clean -d -f -f'
@@ -327,12 +319,8 @@ module.exports = function (grunt) {
 
             // Checkout a previous revision
             function (next) {
-                taskRunMulti('gitcheckout', {
-                    options: {
-                        verbose: true,
-                        branch: revision.branch,
-                        create: false
-                    }
+                taskRunMulti('exec', {
+                    command: 'git checkout -f ' + revision.branch
                 }, next);
             },
 
