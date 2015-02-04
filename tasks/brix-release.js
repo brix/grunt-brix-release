@@ -2,7 +2,9 @@
 
 'use strict';
 
-var path = require('path'), loadNpmTask;
+var path = require('path'),
+    prompt = require('prompt'),
+    loadNpmTask;
 
 loadNpmTask = function loadNpmTask(npmTask) {
     require(npmTask + '/tasks/' + npmTask.replace(/^grunt-(contrib-)?/, ''))(loadNpmTask._grunt);
@@ -86,17 +88,40 @@ module.exports = function (grunt) {
         };
 
         // Define config and run task
-        taskRun = function taskRun(taskName, conf, next) {
+        taskRun = function taskRun(taskName, conf, next, force) {
             if (conf) {
                 // Set task config
                 grunt.config.set(taskName.split(':')[0], conf);
             }
 
-            // Run the task
-            grunt.task.run(taskName, next);
+            if (force) {
+
+console.log('run --force');
+
+                // Run the task
+                grunt.task.run(
+                    function () {
+                        grunt.option("force", true);
+                    },
+                    taskName,
+                    function () {
+                        grunt.option("force", false);
+                    },
+                    next
+                );
+            } else {
+
+console.log('run');
+
+                // Run the task
+                grunt.task.run(
+                    taskName,
+                    next
+                );
+            }
         };
 
-        taskRunMulti = function taskRunMulti(taskName, conf, next) {
+        taskRunMulti = function taskRunMulti(taskName, conf, next, force) {
             var set;
 
             if (conf) {
@@ -107,7 +132,7 @@ module.exports = function (grunt) {
                 taskName += ':' + releaseId;
             }
 
-            taskRun(taskName, set, next);
+            taskRun(taskName, set, next, force);
         };
 
 
@@ -295,8 +320,35 @@ module.exports = function (grunt) {
             // Merge release into master branch
             function (next) {
                 taskRunMulti('exec', {
-                    command: 'git merge -s ours -m "Merge from ' + releaseBranch + '" ' + releaseBranch
-                }, next);
+                    command: 'git merge -s resolve -m "Merge from ' + releaseBranch + '" ' + releaseBranch,
+                    callback: function () {
+                        console.log(arguments);
+                    }
+                }, next, true);
+            },
+
+            function (next) {
+                taskRunMulti(function () {
+                    var done = this.async();
+
+                    prompt.message = '';
+                    prompt.delimiter = '';
+                    prompt.get({
+                        properties: {
+                            confirm: {
+                                description: 'Did you resolve the merge conflict? Enter \'yes\' if so.'
+                            }
+                        }
+                    }, function (err, result) {
+                        if (err || result.confirm.toLowerCase() !== 'yes') {
+                            grunt.log.writeln('See ya!');
+
+                            done();
+                        } else {
+                            done(true);
+                        }
+                    });
+                }, null, next);
             },
 
             // Clean up after merge
